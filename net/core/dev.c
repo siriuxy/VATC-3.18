@@ -192,7 +192,7 @@ static inline struct hlist_head *dev_name_hash(struct net *net, const char *name
 {
 	unsigned int hash = full_name_hash(name, strnlen(name, IFNAMSIZ));
 
-	return &net->dev_name_head[hash_32(hash, NETDEV_HASHBITS)];
+	return &net->desync_cntv_name_head[hash_32(hash, NETDEV_HASHBITS)];
 }
 
 static inline struct hlist_head *dev_index_hash(struct net *net, int ifindex)
@@ -4380,6 +4380,15 @@ static int process_backlog(struct napi_struct *napi, int quota)
  */
 void __napi_schedule(struct napi_struct *n)
 {
+	if (n-> /*NIC driver n*/ ) // if it is the NIC driver (not netbk), then we process the interrupt as receiving. 
+	/*
+	+		net_recv_flag=1;
+ +				
+ +		wake_up(&net_recv_wq);
+ 
+ also, relocate the definition of ret_recv_kthread.
+*/
+	//
 	unsigned long flags;
 
 	local_irq_save(flags);
