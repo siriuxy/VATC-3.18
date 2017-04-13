@@ -2929,6 +2929,7 @@ static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv)
 #endif
 	trace_net_dev_queue(skb);
 	if (q->enqueue) {
+		// xTODO: this goes to Qdisc 用不着，不用看，qidsc implementation.
 		rc = __dev_xmit_skb(skb, q, dev, txq);
 		goto out;
 	}
@@ -2945,6 +2946,8 @@ static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv)
 	   Check this and shot the lock. It is not prone from deadlocks.
 	   Either shot noqueue qdisc, it is even simpler 8)
 	 */
+	// xTODO: normal path (NIC's queuing device goes through the Qdic layer). Below is the no-queue path transmission:
+
 	if (dev->flags & IFF_UP) {
 		int cpu = smp_processor_id(); /* ok because BHs are off */
 
@@ -2961,6 +2964,7 @@ static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv)
 
 			if (!netif_xmit_stopped(txq)) {
 				__this_cpu_inc(xmit_recursion);
+				// xTODO: actually transmission on hardware
 				skb = dev_hard_start_xmit(skb, dev, txq, &rc);
 				__this_cpu_dec(xmit_recursion);
 				if (dev_xmit_complete(rc)) {
@@ -4372,6 +4376,27 @@ static int process_backlog(struct napi_struct *napi, int quota)
 	return work;
 }
 
+// VATC
+static int net_recv_kthread(void *data){
+	printk("~~~~~~~~~%s~~~~~~~~~~~\n", __func__);		
+	struct sched_param net_recv_param={.sched_priority=97};
+	sched_setscheduler(net_recv_task,SCHED_FIFO,&net_recv_param);
+	struct e1000_adapter *adapter=data;
+	while (!kthread_should_stop()) {
+
+		wait_event_interruptible(net_recv_wq,
+				net_recv_flag||kthread_should_stop());
+		cond_resched();
+
+		if (kthread_should_stop())
+			break;
+		e1000_clean_action(adapter);
+	}
+	return 0;
+
+}
+
+
 /**
  * __napi_schedule - schedule for receive
  * @n: entry to schedule
@@ -4380,7 +4405,25 @@ static int process_backlog(struct napi_struct *napi, int quota)
  */
 void __napi_schedule(struct napi_struct *n)
 {
-	if (n-> /*NIC driver n*/ ) // if it is the NIC driver (not netbk), then we process the interrupt as receiving. 
+	// xTODO:
+	// IRQ stuff... 
+	// check static irqreturn_t e1000_intr_msi(int __always_unused irq, void *data) at e1000e/netdev.c
+
+	if (n-> net_device != /*???*/) {
+		n->total_tx_bytes = 0;
+		n->total_tx_packets = 0;
+		n->total_rx_bytes = 0;
+		n->total_rx_packets = 0;
+
+		net_recv_flag=1;
+		// maybe move the above one to be a non-global variable.
+				
+		wake_up(&net_recv_wq);
+	}
+
+
+	// how to find the global variable that is the current device?
+	/*NIC driver n*/  // if it is the NIC driver (not netbk), then we process the interrupt as receiving. 
 	/*
 	+		net_recv_flag=1;
  +				
@@ -4389,6 +4432,23 @@ void __napi_schedule(struct napi_struct *n)
  also, relocate the definition of ret_recv_kthread.
 */
 	//
+
+		// print out all the devices:
+
+	struct net_device *dev;
+
+	read_lock(&dev_base_lock);
+
+	dev = first_net_device(&init_net);
+	while (dev) {
+    	printk(KERN_INFO "found [%s]\n", dev->name);
+    	dev = next_net_device(dev);
+	}
+
+	read_unlock(&dev_base_lock);
+
+	// END printk
+
 	unsigned long flags;
 
 	local_irq_save(flags);
@@ -7068,6 +7128,26 @@ static int __net_init netdev_init(struct net *net)
 	if (net->dev_index_head == NULL)
 		goto err_idx;
 
+	// xTODO:
+
+		printk("%s else initiation\n", netdev->name);
+		NIC_dev=netdev;
+		BQL_flag=1;
+		DQL_flag=1;
+		int vif_index=0;
+		
+		init_waitqueue_head(&net_recv_wq);
+	
+		net_recv_task=kthread_create(net_recv_kthread, (void *)adapter, "e1000e_recv/");
+		
+		if (IS_ERR(net_recv_task)) {
+			printk(KERN_ALERT "kthread_create() fails at e1000e/n");
+		}
+	
+		kthread_bind(net_recv_task,0);
+		wake_up_process(net_recv_task);
+
+	// xTODO END
 	return 0;
 
 err_idx:
